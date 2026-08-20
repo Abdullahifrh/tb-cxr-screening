@@ -15,3 +15,7 @@ fastapi
 uvicorn
 python-multipart
 pillow
+kaggle
+pyyaml
+pytest-cov
+torchaudio
