@@ -1,4 +1,5 @@
-data/raw/
+data/raw/*
+!data/raw/.gitkeep
 data/interim/
 outputs/checkpoints/*.pt
 __pycache__/
