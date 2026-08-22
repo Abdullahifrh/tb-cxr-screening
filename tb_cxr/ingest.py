@@ -1,11 +1,10 @@
-from __future__ import annotations
-
 import re
 import warnings
 from dataclasses import asdict, dataclass
 from pathlib import Path
 import pandas as pd
 from PIL import Image, UnidentifiedImageError
+from sklearn.model_selection import train_test_split
 
 LABEL_PATTERN = re.compile(r"_(\d)$")
 SHENZHEN_MASK_PATTERNS = ["{stem}_mask.png", "{stem}.png"]
@@ -156,10 +155,73 @@ def build_manifest(
 
     return df
 
-if __name__ == "__main__":
-    build_manifest(
-        montgomery_root=Path("data/raw/Montgomery/MontgomerySet"),
-        shenzhen_root=Path("data/raw/ChinaSet_AllFiles/ChinaSet_AllFiles"),
-        shenzhen_mask_root=Path("data/raw/shenzhen_masks/mask"),
-        out_csv=Path("data/processed/manifest.csv"),
+def make_splits(
+    manifest: pd.DataFrame, test_size: float = 0.15, val_size: float = 0.15, seed: int = 42
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Stratified split, jointly on (dataset, label) so both the class balance
+    AND the Montgomery/Shenzhen ratio are preserved in every split."""
+    strat_key = manifest[["dataset", "label"]].astype(str).agg("_".join, axis=1)
+    trainval, test = train_test_split(
+        manifest, test_size=test_size, stratify=strat_key, random_state=seed
     )
+    strat_key_tv = trainval[["dataset", "label"]].astype(str).agg("_".join, axis=1)
+    train, val = train_test_split(
+        trainval,
+        test_size=val_size / (1 - test_size),
+        stratify=strat_key_tv,
+        random_state=seed,
+    )
+    return train, val, test
+
+def add_splits(
+    manifest_csv: Path, out_csv: Path, test_size: float = 0.15, val_size: float = 0.15, seed: int = 42
+) -> pd.DataFrame:
+    manifest = pd.read_csv(manifest_csv)
+    train, val, test = make_splits(manifest, test_size=test_size, val_size=val_size, seed=seed)
+
+    manifest = manifest.copy()
+    manifest["split"] = ""
+    manifest.loc[train.index, "split"] = "train"
+    manifest.loc[val.index, "split"] = "val"
+    manifest.loc[test.index, "split"] = "test"
+
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    manifest.to_csv(out_csv, index=False)
+
+    print(f"Wrote {len(manifest)} records with split assignments to {out_csv}\n")
+    print("Split sizes:")
+    print(manifest["split"].value_counts())
+    print("\nClass/dataset balance per split:")
+    print(manifest.groupby(["split", "dataset", "label"]).size())
+
+    return manifest
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Build the TB-CXR manifest, or add a stratified train/val/test split to an existing one."
+    )
+    parser.add_argument(
+        "--split",
+        action="store_true",
+        help=(
+            "Skip ingestion; read the existing data/processed/manifest.csv, add a "
+            "patient-level stratified train/val/test split column, and write "
+            "data/processed/manifest_split.csv."
+        ),
+    )
+    args = parser.parse_args()
+
+    if args.split:
+        add_splits(
+            manifest_csv=Path("data/processed/manifest.csv"),
+            out_csv=Path("data/processed/manifest_split.csv"),
+        )
+    else:
+        build_manifest(
+            montgomery_root=Path("data/raw/Montgomery/MontgomerySet"),
+            shenzhen_root=Path("data/raw/ChinaSet_AllFiles/ChinaSet_AllFiles"),
+            shenzhen_mask_root=Path("data/raw/shenzhen_masks/mask"),
+            out_csv=Path("data/processed/manifest.csv"),
+        )
