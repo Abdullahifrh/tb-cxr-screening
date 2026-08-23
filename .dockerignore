@@ -1,0 +1,11 @@
+.git
+.gitignore
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+data/
+outputs/figures/
+tests/
+.vscode/
+.idea/
