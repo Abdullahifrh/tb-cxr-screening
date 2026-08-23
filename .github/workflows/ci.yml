@@ -28,10 +28,20 @@ jobs:
         run: |
           python -c "
           import pandas as pd, cv2, numpy as np, os
+
           df = pd.read_csv('data/processed/manifest.csv')
-          paths = set(df['image_path'].dropna().tolist() + df['left_mask_path'].dropna().tolist() + df['right_mask_path'].dropna().tolist())
+          cols = ['image_path', 'left_mask_path', 'right_mask_path']
+          paths = set()
+          for col in cols:
+              if col in df.columns:
+                  paths.update(df[col].dropna().astype(str).tolist())
+
+          paths = {p for p in paths if p.strip()}
+
           for p in paths:
-              os.makedirs(os.path.dirname(p), exist_ok=True)
+              d = os.path.dirname(p)
+              if d:
+                  os.makedirs(d, exist_ok=True)
               if not os.path.exists(p):
                   cv2.imwrite(p, np.zeros((100, 100), dtype=np.uint8))
           "
