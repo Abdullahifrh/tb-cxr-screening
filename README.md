@@ -5,7 +5,7 @@
   <img src="https://img.shields.io/badge/PyTorch-2.x-EE4C2C?style=flat&logo=pytorch&logoColor=white" alt="PyTorch" />
   <img src="https://img.shields.io/badge/FastAPI-0.110-009688?style=flat&logo=fastapi&logoColor=white" alt="FastAPI" />
   <img src="https://img.shields.io/badge/Docker-2496ED?style=flat&logo=docker&logoColor=white" alt="Docker" />
-  <img src="https://img.shields.io/badge/CI%2FCD-Passing-brightgreen?style=flat&logo=githubactions&logoColor=white" alt="CI/CD Status" />
+  <img src="https://github.com/Abdullahifrh/tb-cxr-screening/actions/workflows/ci.yml/badge.svg" alt="CI/CD Status" />
 </p>
 
 Two-stage CAD pipeline for TB screening from chest X-rays. U-Net segments the lung field while a fine-tuned ResNet18 classifies the masked crop as TB-suggestive or normal. The pipeline is trained on Montgomery + Shenzhen (800 images) and served via Dockerized FastAPI, with tests and image publishing wired into CI/CD on every push to `main`.
