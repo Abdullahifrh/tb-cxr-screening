@@ -5,6 +5,10 @@ outputs/checkpoints/*.pt
 __pycache__/
 *.pyc
 .venv/
-.vscode
-.pytest_cache
-.coverage
+.vscode/
+.pytest_cache/
+.ruff_cache/
+*.code-workspace
+.env
+.ipynb_checkpoints/
+.DS_Store
