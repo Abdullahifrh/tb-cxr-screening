@@ -11,10 +11,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: "pip"
@@ -24,30 +24,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Generate synthetic test images
-        run: |
-          python -c "
-          import pandas as pd, cv2, numpy as np, os
-
-          df = pd.read_csv('data/processed/manifest.csv')
-          cols = ['image_path', 'left_mask_path', 'right_mask_path']
-          paths = set()
-          for col in cols:
-              if col in df.columns:
-                  paths.update(df[col].dropna().astype(str).tolist())
-
-          paths = {p for p in paths if p.strip()}
-
-          for p in paths:
-              d = os.path.dirname(p)
-              if d:
-                  os.makedirs(d, exist_ok=True)
-              if not os.path.exists(p):
-                  cv2.imwrite(p, np.zeros((100, 100), dtype=np.uint8))
-          "
-
-      - name: Run tests with coverage
-        run: pytest tests/ -v --cov=tb_cxr
+      - name: Run tests
+        run: pytest -v
 
   publish:
     needs: test
@@ -58,7 +36,7 @@ jobs:
       packages: write
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set lowercase image name
         run: echo "IMAGE_NAME=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
@@ -82,4 +60,4 @@ jobs:
             ghcr.io/${{ env.IMAGE_NAME }}:latest
             ghcr.io/${{ env.IMAGE_NAME }}:${{ github.sha }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=max```
