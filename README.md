@@ -1,181 +1,169 @@
-# TB-CXR Screening — Computer-Aided Tuberculosis Detection Pipeline
+# TB-CXR Screening: Chest X-ray Triage Against the WHO Target
 
-<p align="left">
-  <img src="https://img.shields.io/badge/Python-3.11-3776AB?style=flat&logo=python&logoColor=white" alt="Python 3.11" />
-  <img src="https://img.shields.io/badge/PyTorch-2.x-EE4C2C?style=flat&logo=pytorch&logoColor=white" alt="PyTorch" />
-  <img src="https://img.shields.io/badge/FastAPI-0.110-009688?style=flat&logo=fastapi&logoColor=white" alt="FastAPI" />
-  <img src="https://img.shields.io/badge/Docker-2496ED?style=flat&logo=docker&logoColor=white" alt="Docker" />
-  <img src="https://github.com/Abdullahifrh/tb-cxr-screening/actions/workflows/ci.yml/badge.svg" alt="CI/CD Status" />
-</p>
+![Python](https://img.shields.io/badge/Python-3.11-3776AB) ![PyTorch](https://img.shields.io/badge/PyTorch-2.15-EE4C2C) ![FastAPI](https://img.shields.io/badge/FastAPI-0.162-009688) ![Docker](https://img.shields.io/badge/Docker-2496ED) ![CI/CD](https://github.com/Abdullahifrh/tb-cxr-screening/actions/workflows/ci.yml/badge.svg)
 
-Two-stage CAD pipeline for TB screening from chest X-rays. U-Net segments the lung field while a fine-tuned ResNet18 classifies the masked crop as TB-suggestive or normal. The pipeline is trained on Montgomery + Shenzhen (800 images) and served via Dockerized FastAPI, with tests and image publishing wired into CI/CD on every push to `main`.
+A tuberculosis triage model for chest X-rays, trained on 764 adult X-rays from two public hospital sets and served as a Dockerized FastAPI app. It asks three questions: how close a small model gets to the WHO accuracy target for a triage test, whether segmenting the lungs first helps, and how much of the result holds up at a hospital the model has never seen.
 
----
+## Key results
 
-## 1. Clinical Problem & WHO TPP
+1. **The model can reach the WHO triage minimum, but the threshold fixed in advance does not.** On 153 held-out X-rays it ranks TB above normal with an AUC of 0.964 (95% CI 0.936 to 0.986). At 90% sensitivity it clears 85% of normal X-rays, above the 70% minimum. The threshold chosen in cross-validation lands elsewhere on the same curve: it flags 97% of TB cases but clears only 61% of normal X-rays.
+2. **Segmenting the lungs first does not help.** The U-Net finds the lungs well (median Dice 0.97 to 0.98), but a ResNet18 on the whole X-ray scores higher in cross-validation (AUC 0.922) than on the masked lungs (0.909) or a lung crop (0.903), so the served model skips segmentation. Age and hospital alone reach 0.559, so the model reads the image, not who the patient is or where the X-ray was taken.
+3. **A new hospital needs its own threshold.** Trained on Shenzhen only and tested on Montgomery, the AUC falls to 0.849, and the Shenzhen threshold clears only 16% of normal X-rays. This is why the WHO asks for every CAD product to be calibrated locally.
 
-In high-TB-burden and low-resource settings, the bottleneck is radiologist time and not X-ray capacity. CAD triage tools give every scan an automated first pass: flag the subset that needs a human read, clear the rest.
+## 1. The clinical problem and the WHO target
 
-The WHO's Target Product Profile (TPP) sets the bar for a deployable triage tool:
+In high-burden, low-resource settings the bottleneck is radiologist time, not X-ray capacity. A triage tool reads every X-ray first, flags the ones that need a follow-up test and clears the rest. The WHO target product profile for such a test asks for:
 
-| Requirement | WHO TPP Target |
-|---|---|
-| Sensitivity | **≥ 90%** |
-| Specificity | **≥ 70%** |
-
-A missed TB case (false negative) costs a lot more than an unnecessary follow-up test (false positive) so the decision threshold gets tuned toward sensitivity, not accuracy. See Section 4 for how that plays out on this model.
-
-## 2. Pipeline Architecture
-
-<p align="center">
-  <img src="outputs/figures/pipeline_architecture.png" alt="End-to-end CAD pipeline architecture" width="100%" />
-  <br />
-  <b>Figure 1: End-to-end CAD pipeline architecture</b>
-</p>
-
-<br />
-
-<p align="center">
-  <img src="outputs/figures/segmentation_overlays.png" alt="Segmentation overlays: ground truth vs. predicted lung masks" width="100%" />
-  <br />
-  <b>Figure 2: Ground truth (top) vs. U-Net predictions (bottom) across six test cases</b>
-</p>
-
-- **Stage 1 - Segmentation:** Raw CXR resized to 224×224, U-Net predicts left + right lung masks. Mask resize uses `cv2.INTER_NEAREST` to keep boundaries binary instead of blurred.
-- **Stage 2 - Fusion & Crop:** `combine_lr_masks` merges both masks, crops the frame down to lung tissue only. Shoulders, clavicles, cardiac border — gone before the classifier ever sees them.
-- **Stage 3 - Classification.** ResNet18, two-phase fine-tuned (frozen backbone → full unfreeze), outputs `p(TB)`. Threshold is **0.2101**, not 0.5 — tuned for sensitivity per Section 1.
-
-Cost of this design: one extra inference pass per image (U-Net + ResNet18 instead of one model). Payoff: the classifier's input is constrained to lung tissue by construction, not by hoping the training data is diverse enough to teach it.
-
-## 3. Data Preparation
-
-Montgomery (USA) ships with NLM-native lung masks; Shenzhen (China) masks come from a separately published annotation set, not NLM's original release. This is worth knowing since the two are not annotated the same way. Splits are row-level, zero patient leakage and stratified by class and source.
-
-**Dataset composition:**
-
-| Source | Total | Normal | TB |
-|---|---|---|---|
-| Montgomery | 138 | 80 | 58 |
-| Shenzhen | 662 | 326 | 336 |
-| **Combined** | **800** | **406** | **394** |
-
-**Splits** (`test_size=0.15`, `val_size=0.15`):
-
-| Split | Total | Normal | TB |
-|---|---|---|---|
-| Train | 559 | 284 | 275 |
-| Val | 121 | 61 | 60 |
-| Test | 120 | 61 | 59 |
-
-## 4. Training & Results
-
-**Segmentation (U-Net):** Trained with DiceBCELoss $\rightarrow$ plain BCE underweights the foreground/background pixel imbalance in lung masks.
-
-| Metric | Validation |
-|---|---|
-| Dice | **0.9785** |
-| IoU | **0.9580** |
-
-**Classification (ResNet18):** Two-phase fine-tune $\rightarrow$ frozen backbone first, then fully unfrozen at a lower LR. This is done as we only have 800 images; not enough data to train ResNet18 from scratch without overfitting.
-
-| Metric | Validation |
-|---|---|
-| ROC-AUC | **0.8997** |
-
-**Threshold tuning:** Tuned once on the validation ROC curve for ≥90% sensitivity (landed on 0.2101), applied once to test with no re-tuning against test outcomes.
-
-| Metric | Default (0.5) | Tuned (0.2101) |
+| Requirement | WHO minimum | WHO optimal |
 |---|---|---|
-| Sensitivity | 0.831 (49/59) | **0.881** (52/59) |
-| Specificity | 0.852 (52/61) | 0.623 (38/61) |
-| ROC-AUC | 0.889 | 0.889 |
+| Sensitivity | 90% | 95% |
+| Specificity | 70% | 80% |
 
-<p align="center">
-  <img src="outputs/figures/roc_curve.png" alt="ROC Curve vs. WHO Target Product Profile" width="80%" />
-  <br />
-  <b>Figure 3: Test set ROC curve (AUC = 0.889) benchmarked against the WHO TPP target of ≥90% sensitivity (red dashed line)</b>
-</p>
+A missed TB case costs far more than an extra follow-up test, so the threshold is set for sensitivity first: it is the highest threshold that still flags 90% of TB cases in cross-validation, and the specificity is whatever that leaves.
 
-<br />
+The WHO measures these targets against a bacteriological test in the population that will actually be screened. These datasets have labels from clinical and radiology readings and about 50% TB, so the results here say whether the model reaches the WHO operating point on this benchmark, not whether it meets the WHO standard.
 
-<p align="center">
-  <img src="outputs/figures/confusion_matrix.png" alt="TB Classification Confusion Matrix on Test Set" width="80%" />
-  <br />
-  <b>Figure 4: Test set confusion matrix at default decision boundary (p = 0.5) which gives 49 true positives (TB) and 52 true negatives (Normal) across 120 samples</b>
-</p>
+## 2. Pipeline
 
-**WHO TPP result: NOT MET** $\rightarrow$ 0.881 sensitivity misses the 0.90 target; pushing further tanks specificity to 0.623, well under 0.70. On a 120-image test set, that gap is about one misclassified case and thus not a structural failure. The stronger signal is AUC holding flat from val to test (0.8997 → 0.889), which says the model generalizes even where the single threshold does not clear the bar.
+```mermaid
+flowchart LR
+    A[Chest X-ray] --> B[Pad to square, resize to 224 px]
+    B --> C[Five ResNet18 fold models, averaged]
+    C --> D{p TB at or above threshold?}
+    D -- yes --> E[TB-suggestive, refer for testing]
+    D -- no --> F[Normal]
+```
 
-## 5. Limitations & Future Work
+Before settling on the whole X-ray, the project compares it with two inputs that need a U-Net lung segmentation first:
 
-- **Small test set:** 120 images so each misclassification displaces sensitivity by a lot.
-- **Domain shift:** Only two hospitals, two countries. Unvalidated on any third source.
-- **Not a diagnostic tool:** Currently a research project only.
+![What the classifier sees](outputs/figures/classifier_inputs.png)
 
-**Future work:** My priority is closing the WHO TPP gap and I think that is a data question before a model question. Whether data augmentation actually helps at this scale, or whether a more systematic fine-tuning strategy gets more out of the data I already have, is something I want to test rather than assume. I am also curious about the two different agentic directions this pipeline could feed into: wrapping it as a callable tool behind a natural-language interface, or using it as a fixed baseline that a more general model has to try to beat. And with only two hospitals represented, generalization is the other open question I'd like to look into. Does this hold up on other data sources, or is it overfit to Montgomery and Shenzhen specifically?
+The left column shows the predicted lungs (blue) and the crop box (orange) on two test X-rays with TB. The other columns show the three inputs:
 
-## 6. Inference API
+- **Full image:** the whole X-ray, padded to a square so the anatomy keeps its shape.
+- **Lung mask:** every pixel outside the predicted lungs set to black.
+- **Lung crop:** a box around both lungs with a 5% margin. It keeps the lung behind the heart and the pleura, which the Montgomery masks leave out, and trims most of the shoulders and abdomen.
+
+## 3. Does lung segmentation earn its place?
+
+| Input | Out-of-fold AUC (95% CI) | Specificity at 90% sensitivity (95% CI) |
+|---|---|---|
+| Age and hospital only | 0.559 (0.513 to 0.604) | 12.1% (8.9 to 16.3) |
+| Full image | **0.922** (0.897 to 0.942) | **75.8%** (70.7 to 80.4) |
+| Lung mask | 0.909 (0.884 to 0.931) | 73.8% (68.6 to 78.5) |
+| Lung crop | 0.903 (0.878 to 0.925) | 64.1% (58.5 to 69.3) |
+
+All four rows are scored on the same 611 training X-rays with five-fold cross-validation, so the test set plays no part in the choice. A segmentation-based input would only replace the full image if it raised the out-of-fold AUC by at least 0.01.
+
+Neither does. The full image comes first on both measures. Its lead over the lung mask is small and the intervals overlap, but segmentation adds a second model and gives nothing back, so the served model uses the whole X-ray. The age and hospital row is the shortcut check: if the image model were mostly picking up the patient's age or which hospital took the X-ray, this row would come close to it. It reaches 0.559, barely above chance.
+
+The masks themselves are good, so this is not a segmentation failure:
+
+| Lung segmentation on test X-rays | Images | Median Dice | Worst Dice |
+|---|---|---|---|
+| Montgomery | 25 | 0.982 | 0.961 |
+| Shenzhen | 111 | 0.969 | 0.879 |
+
+## 4. Results against the WHO target
+
+![ROC curves against the WHO target](outputs/figures/roc_vs_who.png)
+
+| | Test set, both hospitals | Montgomery, trained on Shenzhen only |
+|---|---|---|
+| X-rays (TB) | 153 (78) | 127 (57) |
+| AUC (95% CI) | 0.964 (0.936 to 0.986) | 0.849 (0.776 to 0.915) |
+| Threshold, fixed in advance | 0.084 | 0.095 |
+| Sensitivity at that threshold | 97.4% (91.1 to 99.3) | 98.2% (90.7 to 99.7) |
+| Specificity at that threshold | 61.3% (50.0 to 71.5) | 15.7% (9.0 to 26.0) |
+| Best specificity at 90% sensitivity | 85.3% (75.6 to 91.6) | 51.4% (40.0 to 62.8) |
+
+The dots are the thresholds fixed in advance, with 95% intervals. The last row picks the threshold on the evaluated data itself, so it is the best case, not a result anyone could have planned for.
+
+On the test set the curve passes through the WHO box, but the dot sits to its right. The threshold was set to catch 90% of TB cases in the out-of-fold scores, which come from single fold models. The test scores come from the average of the five fold models, and these separate the classes better (AUC 0.964 against 0.922 out of fold). So the same threshold catches 97% of TB cases and gives away specificity. The ranking is good enough for the WHO minimum; the threshold does not carry over.
+
+At Montgomery the ranking itself is weaker. The AUC falls to 0.849, and even the best threshold clears only 51% of normal X-rays. The Shenzhen threshold flags 84% of them. The same gap shows inside the mixed test set: AUC 0.857 on its 25 Montgomery X-rays against 0.979 on the 128 from Shenzhen.
+
+## Method
+
+- **Cohort.** Montgomery County (USA) and Shenzhen (China) frontal chest X-rays, 800 in total. The WHO recommends CAD for people aged 15 and over, so the 36 children are left out; 33 of them are normal, which would also let a model learn "small chest means healthy".
+- **Split.** 20% of the adults are held out as a test set, stratified by hospital and label. It is scored once, at the end.
+- **Segmentation.** A U-Net with a ResNet18 encoder, trained at 256x256 on the training images that have lung masks from either hospital. It builds the lung mask and lung crop inputs; the served model does not need it.
+- **Classifier.** A ResNet18 starting from ImageNet weights, with the first layer summed to one grey channel. It is trained for a fixed 8 epochs with light rotation, shift and contrast changes. There is no horizontal flip, because the heart is on the left.
+- **Model selection without the test set.** Five-fold cross-validation on the training set gives an out-of-fold probability for every training image. These choose the input variant and the threshold. The test set is then scored by the average of the five fold models.
+- **Threshold.** The highest one that flags 90% of the TB cases in the out-of-fold predictions. It travels with the model weights, so the API uses exactly the threshold that was evaluated.
+- **Uncertainty.** 95% Wilson intervals for sensitivity and specificity, and 95% bootstrap intervals for AUC.
+
+`outputs/metrics.json` holds every number in this README, and `data/processed/manifest.csv` lists every X-ray with its age, label and split.
+
+## Inference API
 
 | Endpoint | Method | Purpose |
 |---|---|---|
-| `/health` | `GET` | Confirms both model checkpoints loaded. |
-| `/predict` | `POST` | Runs the full pipeline, returns probability + decision. |
-
-`/predict` runs U-Net → mask fusion → crop → ResNet18 → threshold at `TB_THRESHOLD = 0.2101`. Corrupted uploads get a clean HTTP 400, not a 500.
+| `/health` | `GET` | Confirms the models are loaded and returns the input variant and threshold. |
+| `/predict` | `POST` | Runs the full pipeline on an uploaded X-ray and returns `tb_probability` and `tb_suggestive`. |
 
 ```bash
 curl http://localhost:8000/health
-
-curl -X POST http://localhost:8000/predict \
-  -F "file=@path/to/chest_xray.png"
+curl -X POST http://localhost:8000/predict -F "file=@path/to/chest_xray.png"
 ```
 
-## 7. CI/CD Pipeline
+An upload that is not an image gets an HTTP 400.
 
-`.github/workflows/cicd.yml`, runs on every push/PR to `main`:
+## CI/CD
 
-**CI:**
-- Installs `requirements.txt`
-- Generates synthetic dummy images at manifest paths (real data is `.gitignore`d, so CI has nothing to load without this)
-- `pytest tests/ -v --cov=tb_cxr`
+`.github/workflows/ci.yml` runs on every push and pull request to `main`:
 
-**CD** (only on push to `main`, after tests pass):
-- Logs into GHCR with the built-in `GITHUB_TOKEN` — no extra secrets
-- Builds and pushes the image tagged `:latest` + commit SHA
+- **CI:** installs the pinned requirements and runs the tests. They use small synthetic images, so CI needs neither the data nor the model weights.
+- **CD** (push to `main`, after the tests pass): builds the Docker image and pushes it to GHCR tagged `latest` and the commit SHA. The image downloads the weights from the `model-v1` GitHub release.
 
-## 8. Getting Started
+## Running it
+
+Requires Python 3.11 or newer. The Montgomery and Shenzhen sets come from the U.S. National Library of Medicine ([Jaeger et al., 2014](https://qims.amegroups.org/article/view/5132/html)); the Shenzhen lung masks are a separate public annotation set. Place them as:
+
+```
+data/raw/Montgomery/MontgomerySet/{CXR_png, ClinicalReadings, ManualMask}
+data/raw/ChinaSet_AllFiles/ChinaSet_AllFiles/{CXR_png, ClinicalReadings}
+data/raw/shenzhen_masks/mask/CHNCXR_xxxx_x_mask.png
+```
 
 ```bash
-# Setup
-conda create -n tb-cxr python=3.11 -y
-conda activate tb-cxr
+python -m venv .venv
+.venv\Scripts\activate             # Windows (macOS/Linux: source .venv/bin/activate)
 pip install -r requirements.txt
+python -m tb_cxr.run               # about 3 hours on a laptop CPU, much less on an NVIDIA GPU
+pytest                             # unit tests on synthetic data
+uvicorn tb_cxr.api:app --port 8000 # serve the trained model
 
-# Ingest + split
-python -m tb_cxr.ingest --split
-
-# Train
-python -m tb_cxr.train_segmentation
-python -m tb_cxr.train_classifier
-
-# Evaluate
-python -m tb_cxr.evaluate
-
-# Test
-pytest tests/ -v --cov=tb_cxr
-
-# Run API locally
-uvicorn tb_cxr.inference_api:app --host 0.0.0.0 --port 8000
-
-# Or via Docker
-docker build -t tb-cxr-screening .
+docker build -t tb-cxr-screening . # or: docker pull ghcr.io/abdullahifrh/tb-cxr-screening:latest
 docker run -p 8000:8000 tb-cxr-screening
-
-# Or pull the published image
-docker pull ghcr.io/your-username/tb-cxr-screening:latest
-docker run -p 8000:8000 ghcr.io/your-username/tb-cxr-screening:latest
 ```
+
+```
+tb_cxr/
+  config.py     paths, sizes, training settings, WHO targets
+  data.py       cohort and split, image loading, lung box and classifier inputs
+  models.py     U-Net, ResNet18 classifier, training, cross-validation, saving
+  metrics.py    AUC, Wilson intervals, threshold selection, Dice
+  plots.py      figures
+  run.py        end-to-end pipeline
+  api.py        FastAPI service
+```
+
+## Limitations
+
+- The labels come from clinical and radiology readings, not from a bacteriological test, and the sets are about half TB, far more than any screening population. Sensitivity and specificity carry over to other prevalences; the share of flagged X-rays that really are TB does not.
+- With 78 TB and 75 normal test X-rays, the intervals are wide: 8 points for sensitivity and 21 for specificity at the fixed threshold.
+- The threshold comes from out-of-fold scores of single models but is applied to the average of five. Nested cross-validation, or calibrating the averaged scores, would give a threshold that carries over better.
+- Two hospitals only. Before use anywhere else, the threshold would need local calibration, as the WHO recommends for every CAD product.
+- Research project, not a diagnostic device.
+
+## Data and citation
+
+The Montgomery County and Shenzhen chest X-ray sets were released by the U.S. National Library of Medicine. If you use them, cite:
+
+- Jaeger S, Candemir S, Antani S, Wang YX, Lu PX, Thoma G. Two public chest X-ray datasets for computer-aided screening of pulmonary diseases. *Quant Imaging Med Surg.* 2014;4(6):475-477.
+- Candemir S, Jaeger S, Palaniappan K, et al. Lung segmentation in chest radiographs using anatomical atlases with nonrigid registration. *IEEE Trans Med Imaging.* 2014;33(2):577-590.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE).
