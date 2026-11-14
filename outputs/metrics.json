@@ -1,0 +1,186 @@
+{
+  "cohort": {
+    "images": 800,
+    "excluded_under_15": 36,
+    "split": {
+      "test montgomery": {
+        "images": 25,
+        "tb": 11
+      },
+      "test shenzhen": {
+        "images": 128,
+        "tb": 67
+      },
+      "train montgomery": {
+        "images": 102,
+        "tb": 46
+      },
+      "train shenzhen": {
+        "images": 509,
+        "tb": 267
+      }
+    }
+  },
+  "segmentation_test": {
+    "montgomery": {
+      "images": 25,
+      "median_dice": 0.982,
+      "worst_dice": 0.961
+    },
+    "shenzhen": {
+      "images": 111,
+      "median_dice": 0.969,
+      "worst_dice": 0.879
+    }
+  },
+  "out_of_fold": {
+    "full image": {
+      "auc": {
+        "value": 0.922,
+        "ci95": [
+          0.897,
+          0.942
+        ]
+      },
+      "specificity_at_who_sensitivity": {
+        "value": 0.758,
+        "ci95": [
+          0.707,
+          0.804
+        ],
+        "count": "226/298"
+      }
+    },
+    "lung mask": {
+      "auc": {
+        "value": 0.909,
+        "ci95": [
+          0.884,
+          0.931
+        ]
+      },
+      "specificity_at_who_sensitivity": {
+        "value": 0.738,
+        "ci95": [
+          0.686,
+          0.785
+        ],
+        "count": "220/298"
+      }
+    },
+    "lung crop": {
+      "auc": {
+        "value": 0.903,
+        "ci95": [
+          0.878,
+          0.925
+        ]
+      },
+      "specificity_at_who_sensitivity": {
+        "value": 0.641,
+        "ci95": [
+          0.585,
+          0.693
+        ],
+        "count": "191/298"
+      }
+    },
+    "age and hospital only": {
+      "auc": {
+        "value": 0.559,
+        "ci95": [
+          0.513,
+          0.604
+        ]
+      },
+      "specificity_at_who_sensitivity": {
+        "value": 0.121,
+        "ci95": [
+          0.089,
+          0.163
+        ],
+        "count": "36/298"
+      }
+    }
+  },
+  "shipped": {
+    "variant": "full image",
+    "threshold": 0.0844
+  },
+  "test": {
+    "auc": {
+      "value": 0.964,
+      "ci95": [
+        0.936,
+        0.986
+      ]
+    },
+    "at_threshold": {
+      "threshold": 0.0844,
+      "sensitivity": {
+        "value": 0.974,
+        "ci95": [
+          0.911,
+          0.993
+        ],
+        "count": "76/78"
+      },
+      "specificity": {
+        "value": 0.613,
+        "ci95": [
+          0.5,
+          0.715
+        ],
+        "count": "46/75"
+      }
+    },
+    "specificity_at_who_sensitivity": {
+      "value": 0.853,
+      "ci95": [
+        0.756,
+        0.916
+      ],
+      "count": "64/75"
+    },
+    "auc_by_site": {
+      "montgomery": 0.857,
+      "shenzhen": 0.979
+    }
+  },
+  "external_shenzhen_to_montgomery": {
+    "auc": {
+      "value": 0.849,
+      "ci95": [
+        0.776,
+        0.915
+      ]
+    },
+    "at_threshold": {
+      "threshold": 0.095,
+      "sensitivity": {
+        "value": 0.982,
+        "ci95": [
+          0.907,
+          0.997
+        ],
+        "count": "56/57"
+      },
+      "specificity": {
+        "value": 0.157,
+        "ci95": [
+          0.09,
+          0.26
+        ],
+        "count": "11/70"
+      }
+    },
+    "specificity_at_who_sensitivity": {
+      "value": 0.514,
+      "ci95": [
+        0.4,
+        0.628
+      ],
+      "count": "36/70"
+    }
+  }
+}
